@@ -1,0 +1,9 @@
+lxml
+html2text
+langchain
+langchain-core
+langchain-community
+langchain-huggingface
+beautifulsoup4
+faiss-cpu
+langchain-google-genai
