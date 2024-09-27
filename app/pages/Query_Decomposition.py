@@ -1,23 +1,31 @@
+import streamlit as st
+from langchain.vectorstores import FAISS    
+from langchain_google_genai import ChatGoogleGenerativeAI
 import os
 from dotenv import load_dotenv
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_community.embeddings.sentence_transformer import SentenceTransformerEmbeddings
 from langchain.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain.load import loads, dumps
-from langchain_community.embeddings.sentence_transformer import SentenceTransformerEmbeddings
 from langchain_core.runnables import RunnableParallel, RunnablePassthrough
-from langchain.vectorstores import FAISS    
-    
-load_dotenv()
-def initGeminiLLM():
-    GOOGLE_API_KEY = os.environ["GOOGLE_API_KEY"]
-    llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.5, max_retries=3)
-    return llm
 
-def loadVectorDB(folder_path):
-    embedding_function = SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2")
-    vstore2 = FAISS.load_local(folder_path=folder_path, index_name="blog", embeddings=embedding_function, allow_dangerous_deserialization=True)
-    return vstore2
+st.set_page_config(
+    page_title="Personal Blog Chatbot",
+    page_icon="🐳",
+)
+
+llm,vstore = None, None
+
+if "llm" not in st.session_state:
+    st.write("LLM NOT IN STATE! Go to Welcome and reload!")
+else:
+    llm=st.session_state['llm']
+
+if "vstore" not in st.session_state:
+    st.write("VSTORE NOT IN STATE! Go to Welcome and reload!")
+else:
+    vstore = st.session_state["vstore"]
+
 
 def filterQueries(queries):
     filtered_queries = [d.strip() for d in queries if d.strip()!='']
@@ -38,7 +46,7 @@ def getMultiQueryChain(llm):
     return generate_multi_queries
 
 def formatDocs(docs):
-        return  "\n\n".join(doc.page_content for doc in docs)
+    return  "\n\n".join(doc.page_content for doc in docs)
     
 def reciprocalRankFusionSources(results: list[list], k=60):
     '''
@@ -59,8 +67,7 @@ def reciprocalRankFusionSources(results: list[list], k=60):
     ]
 
     # Return the reranked results as a list of tuples, each containing the document and its fused score
-    return reranked_results[:4] # return top 3 results only
-    
+    return reranked_results[:4] # return top 4 results only
 
 def retrieveSubquestionsRAG(question,sub_question_generator_chain, vectorStore):
     """RAG on each sub-question"""
@@ -113,7 +120,6 @@ def format_qa_pairs(questions, answers):
     print("formatted context: ", formatted_string.strip())
     return formatted_string.strip()
 
-
 def queryDecompostionRAG(question, llm, vectorStore):
     generate_multi_queries = getMultiQueryChain(llm=llm)
     sub_question_generator_chain = generate_multi_queries | filterQueries
@@ -142,24 +148,48 @@ def queryDecompostionRAG(question, llm, vectorStore):
         "sources": rerankedSourcesFiltered
     }
     
+st.markdown("""
+            
+            # 🧩 Query Decomposition: Breaking Down Complex Questions 💡
 
-llm = initGeminiLLM()
-print("llm initiated")
+            Ever asked a question that was a bit too complex? No problem! 🤔
 
-user_question = "What is are statefulsets and volumes? Give code for same"
-vstore = loadVectorDB(folder_path="faissdb_1000")
-# print("vector store loaded")
+            With **Query Decomposition**:
 
-queryDecompostionRAG(question=user_question, llm=llm, vectorStore=vstore)
+            - I take **multi-part or complicated queries** and break them into **smaller, manageable sub-questions** 🔨.
+            - Each sub-question is answered individually, and then I piece everything back together to provide a **complete and accurate response** 🔗.
 
+            This approach helps ensure I cover all aspects of your question—even the tough ones—by tackling it step by step! 🎯
 
+            Try asking something complex and see how I break it down into clear, easy-to-digest answers! 🧠
+            
+            ---
+            
+            
+            """)
 
-# getLLMResponse(llm=llm, retriever=retriever2, question=user_question)
+# Initialize chat history
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-# TODO: add fusion logic with gemini specific prompt first
+# Display chat messages from history on app rerun
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
 
-# for vectorDB that had data other than posts
-# vstore = loadVectorDB(folder_path="faissdb")
-# retriever = vstore.as_retriever()
+# Accept user input
+if prompt := st.chat_input("What is up?"):
+    # Add user message to chat history
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    # Display user message in chat message container
+    with st.chat_message("user"):
+        st.markdown(prompt)
 
-# getLLMResponse(llm=llm, retriever=retriever, question=user_question)
+    # Display assistant response in chat message container
+    with st.chat_message("assistant"):
+        if len(st.session_state.messages):
+            response = queryDecompostionRAG(question=st.session_state.messages[-1]["content"], llm=llm, vectorStore=vstore)
+            answer = response['answer'] + "\n\nSource: " + ", ".join(x for x in response['sources'])
+            st.write(answer)
+    st.session_state.messages.append({"role": "assistant", "content": answer})
+

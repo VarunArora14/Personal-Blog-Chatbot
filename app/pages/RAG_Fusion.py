@@ -1,23 +1,30 @@
+import streamlit as st
+from langchain.vectorstores import FAISS    
+from langchain_google_genai import ChatGoogleGenerativeAI
 import os
 from dotenv import load_dotenv
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_community.embeddings.sentence_transformer import SentenceTransformerEmbeddings
 from langchain.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain.load import loads, dumps
-from langchain_community.embeddings.sentence_transformer import SentenceTransformerEmbeddings
 from langchain_core.runnables import RunnableParallel, RunnablePassthrough
-from langchain.vectorstores import FAISS    
-    
-load_dotenv()
-def initGeminiLLM():
-    GOOGLE_API_KEY = os.environ["GOOGLE_API_KEY"]
-    llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.5, max_retries=3)
-    return llm
 
-def loadVectorDB(folder_path):
-    embedding_function = SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2")
-    vstore2 = FAISS.load_local(folder_path=folder_path, index_name="blog", embeddings=embedding_function, allow_dangerous_deserialization=True)
-    return vstore2
+st.set_page_config(
+    page_title="Personal Blog Chatbot",
+    page_icon="🐳",
+)
+
+llm,vstore = None, None
+
+if "llm" not in st.session_state:
+    st.write("LLM NOT IN STATE! Go to Welcome and reload!")
+else:
+    llm=st.session_state['llm']
+
+if "vstore" not in st.session_state:
+    st.write("VSTORE NOT IN STATE! Go to Welcome and reload!")
+else:
+    vstore = st.session_state["vstore"]
 
 def filterQueries(queries):
     filtered_queries = [d.strip() for d in queries if d.strip()!='']
@@ -68,8 +75,6 @@ def parseConversationalFusion(conversation):
     # print(conversation)
     user_query = conversation["data"]["question"]
     llm_answer = conversation["answer"]
-    sources = set()
-    
     mapper = {}
     
     for doc in conversation["data"]["context"]:
@@ -78,12 +83,7 @@ def parseConversationalFusion(conversation):
         mapper[doc.metadata["source"]]+=1
     
     sourceMappings = sorted(mapper.items(), key=lambda x: x[1], reverse=True)
-    print(sourceMappings)
     sources = [s[0] for s in sourceMappings][:4] # top 4 sources
-    print(sources)
-        
-    
-    # source_objects = []
     
     
     res = {
@@ -128,23 +128,51 @@ def getFusionLLMResponse(llm, retriever, question:str):
     })
     
     return parseConversationalFusion(res)
-    # return res
 
 
-llm = initGeminiLLM()
-print("llm initiated")
+# st.title("🤖 Welcome to the Personal Blog Chatbot! 🌐")
+### **RAG Fusion Page** 🔄
 
 
-vstore2 = loadVectorDB(folder_path="RAG/faissdb_1000")
-print("vector store loaded")
-user_question = "What is are statefulsets and volumes? Give code for same"
-retriever2 = vstore2.as_retriever()
-print(getFusionLLMResponse(llm=llm, retriever=retriever2, question=user_question))
+st.markdown("""
+            
+            # 🔄 RAG Fusion: Smart Question Expansion and Re-ranking 🧠
 
-# TODO: add fusion logic with gemini specific prompt first
+            With **RAG Fusion**, I go beyond a single query to make sure you get the **most accurate answer** possible! Here's how it works:
 
-# for vectorDB that had data other than posts
-# vstore = loadVectorDB(folder_path="faissdb")
-# retriever = vstore.as_retriever()
+            - I take your query and **generate multiple related questions** to explore every angle of your request 💡.
+            - For each question, I **retrieve relevant documents** from my knowledge sources 📄.
+            - These documents are then **re-ranked** based on their relevance to the original query, ensuring the best and most accurate sources are prioritized 📊.
+            - Finally, I bring everything together into a clear, well-rounded response that addresses your needs 🎯.
 
-# getLLMResponse(llm=llm, retriever=retriever, question=user_question)
+            By expanding the query scope and refining the document selection, RAG Fusion helps me deliver answers that are not just good, but great! 🌟
+            
+            ---
+            
+            
+            """)
+
+# Initialize chat history
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+# Display chat messages from history on app rerun
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+# Accept user input
+if prompt := st.chat_input("What is up?"):
+    # Add user message to chat history
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    # Display user message in chat message container
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    # Display assistant response in chat message container
+    with st.chat_message("assistant"):
+        if len(st.session_state.messages):
+            response = getFusionLLMResponse(question=st.session_state.messages[-1]["content"], llm=llm, retriever=vstore.as_retriever())
+            answer = response['answer'] + "\n\nSource: " + ", ".join(x for x in response['sources'])
+            st.write(answer)
+    st.session_state.messages.append({"role": "assistant", "content": answer})
