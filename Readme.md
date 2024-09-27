@@ -33,3 +33,17 @@ GOOGLE_API_KEY=gemini_API_KEY
 ```
 
 - Run command `streamlit run app/Welcome.py` to start the streamlit app
+
+## Screenshots
+
+### Home Page
+
+![alt text](image.png)
+
+### RAG Fusion - Q: What is difference between json and bson?
+
+![alt text](image-2.png)
+
+### Query Decomposition - Q: give code for creating pvc
+
+![alt text](image-3.png)

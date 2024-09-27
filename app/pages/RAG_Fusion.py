@@ -153,26 +153,26 @@ st.markdown("""
             """)
 
 # Initialize chat history
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+if "fusion_messages" not in st.session_state:
+    st.session_state.fusion_messages = []
 
 # Display chat messages from history on app rerun
-for message in st.session_state.messages:
+for message in st.session_state.fusion_messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
 # Accept user input
 if prompt := st.chat_input("What is up?"):
     # Add user message to chat history
-    st.session_state.messages.append({"role": "user", "content": prompt})
+    st.session_state.fusion_messages.append({"role": "user", "content": prompt})
     # Display user message in chat message container
     with st.chat_message("user"):
         st.markdown(prompt)
 
     # Display assistant response in chat message container
     with st.chat_message("assistant"):
-        if len(st.session_state.messages):
-            response = getFusionLLMResponse(question=st.session_state.messages[-1]["content"], llm=llm, retriever=vstore.as_retriever())
+        if len(st.session_state.fusion_messages):
+            response = getFusionLLMResponse(question=st.session_state.fusion_messages[-1]["content"], llm=llm, retriever=vstore.as_retriever())
             answer = response['answer'] + "\n\nSource: " + ", ".join(x for x in response['sources'])
             st.write(answer)
-    st.session_state.messages.append({"role": "assistant", "content": answer})
+    st.session_state.fusion_messages.append({"role": "assistant", "content": answer})
