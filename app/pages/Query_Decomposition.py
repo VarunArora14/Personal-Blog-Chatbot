@@ -20,13 +20,13 @@ st.set_page_config(
 client,llm,vstore = None, None, None
 
 if "llm" not in st.session_state:
-    st.write("LLM NOT IN STATE! Go to Welcome and reload!")
+    st.error("LLM NOT IN STATE! Go to Welcome and reload!")
 else:
     llm=st.session_state['llm']
     client = st.session_state['client']
 
 if "vstore" not in st.session_state:
-    st.write("VSTORE NOT IN STATE! Go to Welcome and reload!")
+    st.error("VSTORE NOT IN STATE! Go to Welcome and reload!")
 else:
     vstore = st.session_state["vstore"]
 

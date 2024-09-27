@@ -6,9 +6,26 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain.load import loads, dumps
 from langchain_community.embeddings.sentence_transformer import SentenceTransformerEmbeddings
 from langchain_core.runnables import RunnableParallel, RunnablePassthrough
-from langchain.vectorstores import FAISS    
-    
+from langchain.vectorstores import FAISS   
+from pydantic import BaseModel, AfterValidator, Field, ValidationError
+import instructor
+import google.generativeai as genai
+
 load_dotenv()
+
+genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
+client = instructor.from_gemini(
+client=genai.GenerativeModel(
+    model_name="models/gemini-1.5-flash-latest",  # model defaults to "gemini-pro"
+),
+mode=instructor.Mode.GEMINI_JSON,
+)
+
+class LLMResponse(BaseModel):
+    question: str
+    isValidResponse: bool = Field(description="True if the answer is related to Kubernetes, AWS, linux, docker, networking or it's related topics, False otherwise")
+    
+
 def initGeminiLLM():
     GOOGLE_API_KEY = os.environ["GOOGLE_API_KEY"]
     llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.5, max_retries=3)
@@ -81,9 +98,6 @@ def parseConversationalFusion(conversation):
     print(sourceMappings)
     sources = [s[0] for s in sourceMappings][:4] # top 4 sources
     print(sources)
-        
-    
-    # source_objects = []
     
     
     res = {
@@ -94,6 +108,30 @@ def parseConversationalFusion(conversation):
     return res
 
 def getFusionLLMResponse(llm, retriever, question:str):
+    validatorResponse = None
+    try:
+        
+        validatorResponse = client.chat.completions.create(
+        response_model=LLMResponse,
+        messages=[
+            {"role": "user", "content": f"Validate the question:  `{question}`"}
+        ]
+    )
+    except ValidationError as ve:
+        obj = LLMResponse()
+        obj.question = question
+        obj.isValidResponse = False
+        obj.errorMessage = "Sorry, your query is not related to any of the blog contents"
+        validatorResponse = obj
+        print("Validation error:", str(ve))
+    
+    if not validatorResponse.isValidResponse:
+        resp = {
+            "question": question,
+            "isValidResponse": validatorResponse.isValidResponse,
+            "errorMessage": "Sorry, your query is not related to any of the blog contents"
+        }
+        return resp
     prompt_template = """
     You are a technical expert assisting with descriptive  answers based on provided tech blog content. Carefully analyze the context retrieved from the blog to answer the following question with precision. If the context includes relevant code snippets, provide them exactly as presented. When the context doesn't contain an answer, give a response based on your own knowledge. Be concise, but thorough, prioritizing accuracy from the documents. Clearly distinguish between information from the context and your own knowledge if used."
 

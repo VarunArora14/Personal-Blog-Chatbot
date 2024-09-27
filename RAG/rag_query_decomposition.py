@@ -7,8 +7,24 @@ from langchain.load import loads, dumps
 from langchain_community.embeddings.sentence_transformer import SentenceTransformerEmbeddings
 from langchain_core.runnables import RunnableParallel, RunnablePassthrough
 from langchain.vectorstores import FAISS    
+from pydantic import BaseModel, AfterValidator, Field, ValidationError
+import instructor
+import google.generativeai as genai
     
 load_dotenv()
+
+genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
+client = instructor.from_gemini(
+client=genai.GenerativeModel(
+    model_name="models/gemini-1.5-flash-latest",  # model defaults to "gemini-pro"
+),
+mode=instructor.Mode.GEMINI_JSON,
+)
+
+class LLMResponse(BaseModel):
+    question: str
+    isValidResponse: bool = Field(description="True if the answer is related to Kubernetes, AWS, linux, docker, networking or it's related topics, False otherwise")
+
 def initGeminiLLM():
     GOOGLE_API_KEY = os.environ["GOOGLE_API_KEY"]
     llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.5, max_retries=3)
@@ -115,6 +131,32 @@ def format_qa_pairs(questions, answers):
 
 
 def queryDecompostionRAG(question, llm, vectorStore):
+    
+    validatorResponse = None
+    try:
+        
+        validatorResponse = client.chat.completions.create(
+        response_model=LLMResponse,
+        messages=[
+            {"role": "user", "content": f"Validate the question:  `{question}`"}
+        ]
+    )
+    except ValidationError as ve:
+        obj = LLMResponse()
+        obj.question = question
+        obj.isValidResponse = False
+        obj.errorMessage = "Sorry, your query is not related to any of the blog contents"
+        validatorResponse = obj
+        print("Validation error:", str(ve))
+    
+    if not validatorResponse.isValidResponse:
+        resp = {
+            "question": question,
+            "isValidResponse": validatorResponse.isValidResponse,
+            "errorMessage": "Sorry, your query is not related to any of the blog contents"
+        }
+        return resp
+    
     generate_multi_queries = getMultiQueryChain(llm=llm)
     sub_question_generator_chain = generate_multi_queries | filterQueries
     subqueryAnswers, subQuestions, rerankedSourcesFiltered = retrieveSubquestionsRAG(question=question, sub_question_generator_chain=sub_question_generator_chain, vectorStore=vectorStore)
