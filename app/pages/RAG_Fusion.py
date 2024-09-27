@@ -8,23 +8,32 @@ from langchain.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain.load import loads, dumps
 from langchain_core.runnables import RunnableParallel, RunnablePassthrough
+from pydantic import BaseModel, AfterValidator, Field, ValidationError
+from typing_extensions import Annotated
+import json
 
 st.set_page_config(
     page_title="Personal Blog Chatbot",
     page_icon="🐳",
 )
 
-llm,vstore = None, None
+client,llm,vstore = None, None, None
 
 if "llm" not in st.session_state:
     st.write("LLM NOT IN STATE! Go to Welcome and reload!")
 else:
-    llm=st.session_state['llm']
+    llm = st.session_state['llm']
+    client = st.session_state['client']
 
 if "vstore" not in st.session_state:
     st.write("VSTORE NOT IN STATE! Go to Welcome and reload!")
 else:
     vstore = st.session_state["vstore"]
+
+class LLMResponse(BaseModel):
+    question: str
+    isValidResponse: bool = Field(description="True if the answer is related to Kubernetes, AWS, linux, docker, networking or it's related topics, False otherwise")
+
 
 def filterQueries(queries):
     filtered_queries = [d.strip() for d in queries if d.strip()!='']
@@ -89,11 +98,38 @@ def parseConversationalFusion(conversation):
     res = {
         "question": user_query,
         "answer": llm_answer,
-        "sources": sources
+        "sources": sources,
+        "isValidResponse": True
     }
     return res
 
 def getFusionLLMResponse(llm, retriever, question:str):
+    
+    validatorResponse = None
+    try:
+        
+        validatorResponse = client.chat.completions.create(
+        response_model=LLMResponse,
+        messages=[
+            {"role": "user", "content": f"Validate the question:  `{question}`"}
+        ]
+    )
+    except ValidationError as ve:
+        obj = LLMResponse()
+        obj.question = question
+        obj.isValidResponse = False
+        obj.errorMessage = "Sorry, your query is not related to any of the blog contents"
+        validatorResponse = obj
+        print("Validation error:", str(ve))
+    
+    if not validatorResponse.isValidResponse:
+        resp = {
+            "question": question,
+            "isValidResponse": validatorResponse.isValidResponse,
+            "errorMessage": "Sorry, your query is not related to any of the blog contents"
+        }
+        return resp
+    
     prompt_template = """
     You are a technical expert assisting with descriptive  answers based on provided tech blog content. Carefully analyze the context retrieved from the blog to answer the following question with precision. If the context includes relevant code snippets, provide them exactly as presented. When the context doesn't contain an answer, give a response based on your own knowledge. Be concise, but thorough, prioritizing accuracy from the documents. Clearly distinguish between information from the context and your own knowledge if used."
 
@@ -173,6 +209,10 @@ if prompt := st.chat_input("What is up?"):
     with st.chat_message("assistant"):
         if len(st.session_state.fusion_messages):
             response = getFusionLLMResponse(question=st.session_state.fusion_messages[-1]["content"], llm=llm, retriever=vstore.as_retriever())
-            answer = response['answer'] + "\n\nSource: " + ", ".join(x for x in response['sources'])
+            answer = None
+            if response["isValidResponse"]==False:
+                answer = response["errorMessage"]
+            else:
+                answer = response['answer'] + "\n\nSource: " + ", ".join(x for x in response['sources'])
             st.write(answer)
     st.session_state.fusion_messages.append({"role": "assistant", "content": answer})

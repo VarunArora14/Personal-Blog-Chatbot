@@ -8,23 +8,31 @@ from langchain.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain.load import loads, dumps
 from langchain_core.runnables import RunnableParallel, RunnablePassthrough
+from pydantic import BaseModel, AfterValidator, Field, ValidationError
+from typing_extensions import Annotated
+import json
 
 st.set_page_config(
     page_title="Personal Blog Chatbot",
     page_icon="🐳",
 )
 
-llm,vstore = None, None
+client,llm,vstore = None, None, None
 
 if "llm" not in st.session_state:
     st.write("LLM NOT IN STATE! Go to Welcome and reload!")
 else:
     llm=st.session_state['llm']
+    client = st.session_state['client']
 
 if "vstore" not in st.session_state:
     st.write("VSTORE NOT IN STATE! Go to Welcome and reload!")
 else:
     vstore = st.session_state["vstore"]
+
+class LLMResponse(BaseModel):
+    question: str
+    isValidResponse: bool = Field(description="True if the answer is related to Kubernetes, AWS, linux, docker, networking or it's related topics, False otherwise")
 
 
 def filterQueries(queries):
@@ -121,6 +129,32 @@ def format_qa_pairs(questions, answers):
     return formatted_string.strip()
 
 def queryDecompostionRAG(question, llm, vectorStore):
+    
+    validatorResponse = None
+    try:
+        
+        validatorResponse = client.chat.completions.create(
+        response_model=LLMResponse,
+        messages=[
+            {"role": "user", "content": f"Validate the question:  `{question}`"}
+        ]
+    )
+    except ValidationError as ve:
+        obj = LLMResponse()
+        obj.question = question
+        obj.isValidResponse = False
+        obj.errorMessage = "Sorry, your query is not related to any of the blog contents"
+        validatorResponse = obj
+        print("Validation error:", str(ve))
+    
+    if not validatorResponse.isValidResponse:
+        resp = {
+            "question": question,
+            "isValidResponse": validatorResponse.isValidResponse,
+            "errorMessage": "Sorry, your query is not related to any of the blog contents"
+        }
+        return resp
+    
     generate_multi_queries = getMultiQueryChain(llm=llm)
     sub_question_generator_chain = generate_multi_queries | filterQueries
     subqueryAnswers, subQuestions, rerankedSourcesFiltered = retrieveSubquestionsRAG(question=question, sub_question_generator_chain=sub_question_generator_chain, vectorStore=vectorStore)
@@ -145,7 +179,8 @@ def queryDecompostionRAG(question, llm, vectorStore):
     return {
         "question": question,
         "answer": llmAnswer,
-        "sources": rerankedSourcesFiltered
+        "sources": rerankedSourcesFiltered,
+        "isValidResponse": True
     }
     
 st.markdown("""
@@ -189,7 +224,11 @@ if prompt := st.chat_input("What is up?"):
     with st.chat_message("assistant"):
         if len(st.session_state.decomposition_messages):
             response = queryDecompostionRAG(question=st.session_state.decomposition_messages[-1]["content"], llm=llm, vectorStore=vstore)
-            answer = response['answer'] + "\n\nSource: " + ", ".join(x for x in response['sources'])
+            answer = None
+            if response["isValidResponse"]==False:
+                answer = response["errorMessage"]
+            else:
+                answer = response['answer'] + "\n\nSource: " + ", ".join(x for x in response['sources'])
             st.write(answer)
     st.session_state.decomposition_messages.append({"role": "assistant", "content": answer})
 

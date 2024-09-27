@@ -4,6 +4,8 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 import os
 from dotenv import load_dotenv
 from langchain_community.embeddings.sentence_transformer import SentenceTransformerEmbeddings
+import instructor
+import google.generativeai as genai
 
 # https://blog.streamlit.io/introducing-two-new-caching-commands-to-replace-st-cache/
 
@@ -17,8 +19,16 @@ def initGeminiLLM():
     # load_dotenv()
     # GOOGLE_API_KEY = os.environ["GOOGLE_API_KEY"]
     os.environ["GOOGLE_API_KEY"] = st.secrets["GOOGLE_API_KEY"]
+    genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
+    client = instructor.from_gemini(
+    client=genai.GenerativeModel(
+        model_name="models/gemini-1.5-flash-latest",  # model defaults to "gemini-pro"
+    ),
+    mode=instructor.Mode.GEMINI_JSON,
+)
+    
     llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.5, max_retries=3)
-    return llm
+    return client, llm
 
 @st.cache_resource
 def loadVectorDB(folder_path="RAG/faissdb_1000"):
@@ -29,7 +39,7 @@ def loadVectorDB(folder_path="RAG/faissdb_1000"):
 
 # to be used by fusion and query decomposition
 if "llm" not in st.session_state:
-    st.session_state["llm"] = initGeminiLLM()
+    st.session_state["client"], st.session_state["llm"] = initGeminiLLM()
 
 if "vstore" not in st.session_state:
     st.session_state["vstore"] = loadVectorDB()
