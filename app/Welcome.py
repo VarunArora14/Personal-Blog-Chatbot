@@ -14,13 +14,15 @@ st.set_page_config(
 
 @st.cache_resource
 def initGeminiLLM():
-    load_dotenv()
-    GOOGLE_API_KEY = os.environ["GOOGLE_API_KEY"]
+    # load_dotenv()
+    # GOOGLE_API_KEY = os.environ["GOOGLE_API_KEY"]
+    os.environ["GOOGLE_API_KEY"] = st.secrets["GOOGLE_API_KEY"]
     llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest", temperature=0.5, max_retries=3)
     return llm
 
 @st.cache_resource
 def loadVectorDB(folder_path="RAG/faissdb_1000"):
+    os.environ["HUGGINGFACEHUB_API_TOKEN"] = st.secrets["HUGGINGFACEHUB_API_TOKEN"]
     embedding_function = SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2")
     vstore2 = FAISS.load_local(folder_path=folder_path, index_name="blog", embeddings=embedding_function, allow_dangerous_deserialization=True)
     return vstore2
