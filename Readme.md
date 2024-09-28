@@ -32,6 +32,15 @@ HUGGINGFACEHUB_API_TOKEN=hf_API_KEY
 GOOGLE_API_KEY=gemini_API_KEY
 ```
 
+This will help run APIs in `RAG` folder. For streamlit app APIs to run, create another folder named `.streamlit` and inside it file named `secrets.toml` and populate like following -
+
+```
+HUGGINGFACEHUB_API_TOKEN = "hf_API_KEY"
+GOOGLE_API_KEY = "gemini_API_KEY"
+```
+
+This is so we can deploy it to streamlit cloud and use these as our secrets.
+
 - Run command `streamlit run app/Welcome.py` to start the streamlit app
 
 ## Screenshots
