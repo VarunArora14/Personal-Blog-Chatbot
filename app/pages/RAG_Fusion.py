@@ -1,45 +1,54 @@
-import streamlit as st
-from langchain.vectorstores import FAISS    
-from langchain_google_genai import ChatGoogleGenerativeAI
-import os
-from dotenv import load_dotenv
-from langchain_community.embeddings.sentence_transformer import SentenceTransformerEmbeddings
-from langchain.prompts import PromptTemplate
-from langchain_core.output_parsers import StrOutputParser
-from langchain.load import loads, dumps
-from langchain_core.runnables import RunnableParallel, RunnablePassthrough
-from pydantic import BaseModel, AfterValidator, Field, ValidationError
-from typing_extensions import Annotated
 import json
+import os
+
+import streamlit as st
+from dotenv import load_dotenv
+from langchain.load import dumps, loads
+from langchain.prompts import PromptTemplate
+from langchain.vectorstores import FAISS
+from langchain_community.embeddings.sentence_transformer import (
+    SentenceTransformerEmbeddings,
+)
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.runnables import RunnableParallel, RunnablePassthrough
+from langchain_google_genai import ChatGoogleGenerativeAI
+from pydantic import AfterValidator, BaseModel, Field, ValidationError
+from typing_extensions import Annotated
 
 st.set_page_config(
     page_title="Personal Blog Chatbot",
     page_icon="🐳",
 )
 
-client,llm,vstore = None, None, None
+client, llm, vstore = None, None, None
 
 if "llm" not in st.session_state:
     st.error("LLM NOT IN STATE! Go to Welcome and reload!")
 else:
-    llm = st.session_state['llm']
-    client = st.session_state['client']
+    llm = st.session_state["llm"]
+    client = st.session_state["client"]
 
 if "vstore" not in st.session_state:
     st.error("VSTORE NOT IN STATE! Go to Welcome and reload!")
 else:
     vstore = st.session_state["vstore"]
 
+
 class LLMResponse(BaseModel):
     question: str
-    isValidResponse: bool = Field(description="True if the answer is related to Kubernetes, AWS, linux, docker, networking or it's related topics, False otherwise")
+    isValidResponse: bool = Field(
+        description="True if the answer is related to URL Shortener, blog chatbot, system design, GenAI, Kubernetes, AWS, linux, docker, networking or it's related topics, False otherwise"
+    )
 
 
 def filterQueries(queries):
-    filtered_queries = [d.strip() for d in queries if d.strip()!='']
+    filtered_queries = [d.strip() for d in queries if d.strip() != ""]
     print("filtered queries:", filtered_queries)
     print("len of filtered queries:", len(filtered_queries))
-    return filtered_queries if len(filtered_queries)<=3 else filtered_queries[-3:] # last elements
+    return (
+        filtered_queries if len(filtered_queries) <= 3 else filtered_queries[-3:]
+    )  # last elements
+
 
 def getMultiQueryChain(llm):
     multi_question_template = """
@@ -48,10 +57,15 @@ def getMultiQueryChain(llm):
     
     Question: {question}
     """
-    
-    multi_question_prompt = PromptTemplate(template=multi_question_template, input_variables=["question"])
-    generate_multi_queries = multi_question_prompt | llm | StrOutputParser() | (lambda x: x.split("\n"))
+
+    multi_question_prompt = PromptTemplate(
+        template=multi_question_template, input_variables=["question"]
+    )
+    generate_multi_queries = (
+        multi_question_prompt | llm | StrOutputParser() | (lambda x: x.split("\n"))
+    )
     return generate_multi_queries
+
 
 def reciprocalRankFusion(results: list[list], k=60):
     fused_scores = {}
@@ -63,7 +77,7 @@ def reciprocalRankFusion(results: list[list], k=60):
                 fused_scores[doc_str] = 0
             previous_score = fused_scores[doc_str]
             fused_scores[doc_str] += 1 / (rank + k)
-    
+
     # No need to send scores for using docs as context
     reranked_results = [
         loads(doc)
@@ -73,63 +87,66 @@ def reciprocalRankFusion(results: list[list], k=60):
     # Return the reranked results as a list of tuples, each containing the document and its fused score
     return reranked_results
 
-def getMultiQueryDocs(llm, retriever, question:str):
+
+def getMultiQueryDocs(llm, retriever, question: str):
     print("initial question:", question)
     generate_multi_queries = getMultiQueryChain(llm=llm)
-    retrieval_chain = generate_multi_queries | filterQueries | retriever.map() | reciprocalRankFusion
+    retrieval_chain = (
+        generate_multi_queries | filterQueries | retriever.map() | reciprocalRankFusion
+    )
     return retrieval_chain.invoke(question)
 
+
 def parseConversationalFusion(conversation):
-    
     # print(conversation)
     user_query = conversation["data"]["question"]
     llm_answer = conversation["answer"]
     mapper = {}
-    
+
     for doc in conversation["data"]["context"]:
         if doc.metadata["source"] not in mapper:
-            mapper[doc.metadata["source"]]=0
-        mapper[doc.metadata["source"]]+=1
-    
+            mapper[doc.metadata["source"]] = 0
+        mapper[doc.metadata["source"]] += 1
+
     sourceMappings = sorted(mapper.items(), key=lambda x: x[1], reverse=True)
-    sources = [s[0] for s in sourceMappings][:4] # top 4 sources
-    
-    
+    sources = [s[0] for s in sourceMappings][:4]  # top 4 sources
+
     res = {
         "question": user_query,
         "answer": llm_answer,
         "sources": sources,
-        "isValidResponse": True
+        "isValidResponse": True,
     }
     return res
 
-def getFusionLLMResponse(llm, retriever, question:str):
-    
+
+def getFusionLLMResponse(llm, retriever, question: str):
     validatorResponse = None
     try:
-        
         validatorResponse = client.chat.completions.create(
-        response_model=LLMResponse,
-        messages=[
-            {"role": "user", "content": f"Validate the question:  `{question}`"}
-        ]
-    )
+            response_model=LLMResponse,
+            messages=[
+                {"role": "user", "content": f"Validate the question:  `{question}`"}
+            ],
+        )
     except ValidationError as ve:
         obj = LLMResponse()
         obj.question = question
         obj.isValidResponse = False
-        obj.errorMessage = "Sorry, your query is not related to any of the blog contents"
+        obj.errorMessage = (
+            "Sorry, your query is not related to any of the blog contents"
+        )
         validatorResponse = obj
         print("Validation error:", str(ve))
-    
+
     if not validatorResponse.isValidResponse:
         resp = {
             "question": question,
             "isValidResponse": validatorResponse.isValidResponse,
-            "errorMessage": "Sorry, your query is not related to any of the blog contents"
+            "errorMessage": "Sorry, your query is not related to any of the blog contents",
         }
         return resp
-    
+
     prompt_template = """
     You are a technical expert assisting with descriptive  answers based on provided tech blog content. Carefully analyze the context retrieved from the blog to answer the following question with precision. If the context includes relevant code snippets, provide them exactly as presented. When the context doesn't contain an answer, give a response based on your own knowledge. Be concise, but thorough, prioritizing accuracy from the documents. Clearly distinguish between information from the context and your own knowledge if used."
 
@@ -139,30 +156,36 @@ def getFusionLLMResponse(llm, retriever, question:str):
     Question: 
     {question}"""
 
-    prompt = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
-    
+    prompt = PromptTemplate(
+        template=prompt_template, input_variables=["context", "question"]
+    )
+
     def formatDocs(docs):
-        return  "\n\n".join(doc.page_content for doc in docs)
-    
+        return "\n\n".join(doc.page_content for doc in docs)
+
     rag_chain_from_docs = (
         {
             "context": lambda x: formatDocs(x["data"]["context"]),
-            "question": lambda x: x["data"]["question"]
+            "question": lambda x: x["data"]["question"],
         }
         | prompt
         | llm
         | StrOutputParser()
     )
-    
-    rag_chain_with_source = RunnableParallel(
-        {"data": RunnablePassthrough()}
-    ).assign(answer=rag_chain_from_docs)
-    
-    res = rag_chain_with_source.invoke({
-        "context": getMultiQueryDocs(llm=llm, retriever=retriever, question=question),
-        "question": question
-    })
-    
+
+    rag_chain_with_source = RunnableParallel({"data": RunnablePassthrough()}).assign(
+        answer=rag_chain_from_docs
+    )
+
+    res = rag_chain_with_source.invoke(
+        {
+            "context": getMultiQueryDocs(
+                llm=llm, retriever=retriever, question=question
+            ),
+            "question": question,
+        }
+    )
+
     return parseConversationalFusion(res)
 
 
@@ -208,11 +231,19 @@ if prompt := st.chat_input("What is up?"):
     # Display assistant response in chat message container
     with st.chat_message("assistant"):
         if len(st.session_state.fusion_messages):
-            response = getFusionLLMResponse(question=st.session_state.fusion_messages[-1]["content"], llm=llm, retriever=vstore.as_retriever())
+            response = getFusionLLMResponse(
+                question=st.session_state.fusion_messages[-1]["content"],
+                llm=llm,
+                retriever=vstore.as_retriever(),
+            )
             answer = None
-            if response["isValidResponse"]==False:
+            if response["isValidResponse"] == False:
                 answer = response["errorMessage"]
             else:
-                answer = response['answer'] + "\n\nSource: " + ", ".join(x for x in response['sources'])
+                answer = (
+                    response["answer"]
+                    + "\n\nSource: "
+                    + ", ".join(x for x in response["sources"])
+                )
             st.write(answer)
     st.session_state.fusion_messages.append({"role": "assistant", "content": answer})
