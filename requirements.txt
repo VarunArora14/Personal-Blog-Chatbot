@@ -10,3 +10,4 @@ langchain-google-genai
 streamlit
 instructor
 google-generativeai
+sentence-transformers
